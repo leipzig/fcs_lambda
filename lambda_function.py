@@ -33,7 +33,7 @@ def lambda_handler(event, context):
         #data = response['Body'].read().decode('utf-8')
         
         s3 = boto3.resource('s3')
-        s3.Bucket(bucket).download_file(key, 'my_local_image.jpg')
+        s3.Bucket(bucket).download_file(key, '/tmp/'+key)
         
         meta, data = fcsparser.parse(path, reformat_meta=True, meta_data_only=True)
         
