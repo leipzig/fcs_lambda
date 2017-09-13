@@ -26,17 +26,16 @@ def lambda_handler(event, context):
         bucket = s3_record['s3']['bucket']['name']
         logger.info("Bucket: {} \t Key: {}".format(bucket, key))
         # Generate a signed URL for the uploaded asset
-        signed_url = get_signed_url(SIGNED_URL_EXPIRATION, bucket, key)
-        logger.info("Signed URL: {}".format(signed_url))
-        # Launch MediaInfo
-        # Pass the signed URL of the uploaded asset to MediaInfo as an input
-        # MediaInfo will extract the technical metadata from the asset
-        # The extracted metadata will be outputted in XML format and
-        # stored in the variable xml_output
-        xml_output = subprocess.check_output(["./mediainfo", "--full", "--output=XML", signed_url])
-        logger.info("Output: {}".format(xml_output))
+        #signed_url = get_signed_url(SIGNED_URL_EXPIRATION, bucket, key)
+        #logger.info("Signed URL: {}".format(signed_url))
         
-        meta, data = fcsparser.parse(path, reformat_meta=True)
+        #response = s3.get_object(Bucket=bucket, Key=key)
+        #data = response['Body'].read().decode('utf-8')
+        
+        s3 = boto3.resource('s3')
+        s3.Bucket(bucket).download_file(key, 'my_local_image.jpg')
+        
+        meta, data = fcsparser.parse(path, reformat_meta=True, meta_data_only=True)
         
         #for some reasons this is in bytes
         meta['__header__']['FCS format'] = meta['__header__']['FCS format'].decode('ascii')
