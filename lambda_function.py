@@ -31,37 +31,48 @@ def lambda_handler(event, context):
         
         #response = s3.get_object(Bucket=bucket, Key=key)
         #data = response['Body'].read().decode('utf-8')
-        
-        s3 = boto3.resource('s3')
-        s3.Bucket(bucket).download_file(key, '/tmp/'+key)
-        
-        meta, data = fcsparser.parse(path, reformat_meta=True, meta_data_only=True)
-        
-        #for some reasons this is in bytes
-        meta['__header__']['FCS format'] = meta['__header__']['FCS format'].decode('ascii')
-        
-        #pandas dataframe
-        channels = meta.pop('_channels_', None)
-        
-        with open('meta.txt', 'w') as f:
-          json.dump(meta, f, ensure_ascii=False)
-        
-        channels.to_csv('channels.txt',sep="\t")
-        save_record(key, xml_output)
+        record = extract_record(bucket, key)
+        save_record(key, record['fcs_metadata'], record['s3_metadata'])
 
-def save_record(key, xml_output):
+def extract_record(bucket, key):
+    s3 = boto3.resource('s3')
+    s3_object = s3.Object(bucket, key)
+
+    s3.Bucket(bucket).download_file(key, '/tmp/'+key)
+    
+    logger.info("i hope fcsparser can handle {0}".format('/tmp/'+key))
+    
+    fcs_metadata = fcsparser.parse('/tmp/'+key, reformat_meta=True, meta_data_only=True)
+    
+    #for some reasons this is in bytes
+    fcs_metadata['__header__']['FCS format'] = fcs_metadata['__header__']['FCS format'].decode('ascii')
+    
+    #dynamo doesn't like tuples
+    fcs_metadata['_channel_names_'] = list(fcs_metadata['_channel_names_'])
+    
+    #pandas dataframe
+    channels = fcs_metadata.pop('_channels_', None)
+    
+    #with open('meta.txt', 'w') as f:
+    #  json.dump(meta, f, ensure_ascii=False)
+    
+    #channels.to_csv('channels.txt',sep="\t")
+    return({'fcs_metadata':dict(fcs_metadata),'s3_metadata':s3_object.metadata})
+
+def save_record(key, fcs_metadata, s3_metadata):
     """
     Save record to DynamoDB
 
     :param key:         S3 Key Name
-    :param xml_output:  Technical Metadata in XML Format
+    :param xml_output:  Technical Metadata
     :return:
     """
     logger.info("Saving record to DynamoDB...")
     TABLE.put_item(
        Item={
             'keyName': key,
-            'technicalMetadata': xml_output
+            'fcs_metadata': fcs_metadata,
+            's3_metadata': s3_metadata
         }
     )
     logger.info("Saved record to DynamoDB")
