@@ -2,6 +2,9 @@ import logging
 import subprocess
 import fcsparser
 import boto3
+import json
+import requests
+import time
 
 SIGNED_URL_EXPIRATION = 300     # The number of seconds that the Signed URL is valid
 DYNAMODB_TABLE_NAME = "TechnicalMetadata"
@@ -25,14 +28,68 @@ def lambda_handler(event, context):
         key = s3_record['s3']['object']['key']
         bucket = s3_record['s3']['bucket']['name']
         logger.info("Bucket: {} \t Key: {}".format(bucket, key))
-        # Generate a signed URL for the uploaded asset
-        #signed_url = get_signed_url(SIGNED_URL_EXPIRATION, bucket, key)
-        #logger.info("Signed URL: {}".format(signed_url))
-        
-        #response = s3.get_object(Bucket=bucket, Key=key)
-        #data = response['Body'].read().decode('utf-8')
         record = extract_record(bucket, key)
-        save_record(key, record['fcs_metadata'], record['s3_metadata'])
+        save_record(key, record['fcs_metadata'], record['fcs_channels'], record['s3_metadata'])
+        announce_record(bucket, key, record['fcs_metadata'], record['s3_metadata'])
+
+def announce_record(bucket, key, fcs_metadata, s3_metadata):
+    pretext = "{trial} {assay} {tubetype} {fcsfile} uploaded as {key}".format(trial=s3_metadata['trial'],assay=s3_metadata['assay'],tubetype=s3_metadata['tubetype'],fcsfile=s3_metadata['qqfilename'],key=key)
+
+    s3 = boto3.client('s3')
+    signed_url = s3.generate_presigned_url(
+        'get_object', 
+        Params = { 
+        'Bucket': bucket, 
+        'Key': key,
+        'ResponseContentDisposition': 'attachment; filename={}'.format(s3_metadata['qqfilename'])
+        }, 
+        ExpiresIn = SIGNED_URL_EXPIRATION, )
+
+    
+    slack_data = """{{
+    "attachments": [
+        {{
+            "fallback": "{pretext}",
+            "color": "#36a64f",
+            "pretext": "New upload",
+            "title": "{title}",
+            "title_link": "{url}",
+            "text": "This url will expire in 300 seconds",
+            "fields": [
+                {{
+                    "title": "Trial",
+                    "value": "{trial}",
+                    "short": true
+                }},
+                {{
+                    "title": "Assay",
+                    "value": "{assay}",
+                    "short": true
+                }},
+                {{
+                    "title": "Tube type",
+                    "value": "{tubetype}",
+                    "short": true
+                }}
+            ],
+            "footer_icon": "https://s3.amazonaws.com/cytovas-public/favicon-36.png",
+            "footer": "FCS Uploader",
+            "ts": {now}
+        }}
+    ]
+}}
+""".format(pretext=pretext,url=signed_url,title=s3_metadata['qqfilename'],trial=s3_metadata['trial'],assay=s3_metadata['assay'],tubetype=s3_metadata['tubetype'],now=time.time())
+
+    webhook_url = 'https://hooks.slack.com/services/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'
+    response = requests.post(
+        webhook_url, data=slack_data,
+        headers={'Content-Type': 'application/json'}
+    )
+    if response.status_code != 200:
+        raise ValueError(
+           'Request to slack returned an error %s, the response is:\n%s'
+            % (response.status_code, response.text)
+        )
 
 def extract_record(bucket, key):
     s3 = boto3.resource('s3')
@@ -53,13 +110,12 @@ def extract_record(bucket, key):
     #pandas dataframe
     channels = fcs_metadata.pop('_channels_', None)
     
-    #with open('meta.txt', 'w') as f:
-    #  json.dump(meta, f, ensure_ascii=False)
+    #this gets serialized as json so it can be stored in dynamodb
+    fcs_channels=channels.to_json()
     
-    #channels.to_csv('channels.txt',sep="\t")
-    return({'fcs_metadata':dict(fcs_metadata),'s3_metadata':s3_object.metadata})
+    return({'fcs_metadata':dict(fcs_metadata),'fcs_channels':fcs_channels,'s3_metadata':s3_object.metadata})
 
-def save_record(key, fcs_metadata, s3_metadata):
+def save_record(key, fcs_metadata, fcs_channels, s3_metadata):
     """
     Save record to DynamoDB
 
@@ -72,6 +128,7 @@ def save_record(key, fcs_metadata, s3_metadata):
        Item={
             'keyName': key,
             'fcs_metadata': fcs_metadata,
+            'fcs_channels': fcs_channels,
             's3_metadata': s3_metadata
         }
     )
