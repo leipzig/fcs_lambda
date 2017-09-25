@@ -5,12 +5,12 @@ rule lambda:
     shell:
         """
         cp lambda_function.py fcs_lambda/
-        cd lambda
+        cd fcs_lambda
         zip -r -9 -q lambda.zip *
         """
 
 rule upload:
-    input: "lambda/lambda.zip"
+    input: "fcs_lambda/lambda.zip"
     shell:
         """
         aws lambda delete-function --function-name LambdaFCS
