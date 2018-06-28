@@ -80,7 +80,7 @@ def announce_record(bucket, key, fcs_metadata, s3_metadata):
 }}
 """.format(pretext=pretext,url=signed_url,title=s3_metadata['qqfilename'],trial=s3_metadata['trial'],assay=s3_metadata['assay'],tubetype=s3_metadata['tubetype'],now=time.time())
 
-    webhook_url = 'https://hooks.slack.com/services/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'
+    webhook_url = 'YOURWEBHOOK'
     response = requests.post(
         webhook_url, data=slack_data,
         headers={'Content-Type': 'application/json'}
